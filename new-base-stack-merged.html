@@ -960,77 +960,172 @@ canvas{touch-action:manipulation}
         function refreshArcadeRecords(){document.querySelectorAll('[data-record]').forEach(el=>{const id=el.getAttribute('data-record');const raw=localStorage.getItem('lincolnArcadeBest_'+id);if(raw!==null){const val=Math.floor(Number(raw)||0);localStorage.setItem('lincolnArcadeBest_'+id,String(val));el.textContent=id==='reaction'?val+' ms':val;}});}
         refreshArcadeRecords();
 
-        // 1. STABLE FIXED MECHANICS ENGINE: FLAPPY BIRD INPUT CONTROL
-        const fCanvas = document.getElementById('flappyCanvas'); const fCtx = fCanvas.getContext('2d');
-        let fBird, fPipes, fFrame, fScore, flappyLooping, bgX = 0;
+        // 1. FLAPPY BIRD: DELTA-TIMED MOVEMENT, CIRCLE/RECT COLLISIONS, SCORE POPS + DEATH FX
+        const fCanvas = document.getElementById('flappyCanvas');
+        const fCtx = fCanvas.getContext('2d');
+        let fBird, fPipes, fFrame, fScore, flappyLooping=false, flappyDying=false;
+        let bgX=0, fLastTime=0, fElapsed=0, fDeathAt=0, fParticles=[], fScorePop=0, fShake=0;
         function initFlappy() {
-            fBird = {x:90, y:240, r:13, v:0, targetTilt:0, currentTilt:0}; fPipes = []; fFrame = 0; fScore = 0; flappyLooping = true;
-            document.getElementById('flappy-menu').classList.add('hidden'); document.getElementById('flappy-over').classList.add('hidden');
-            document.getElementById('flappy-score').classList.remove('hidden'); document.getElementById('flappy-score').innerText = 0;
-            runFlappy();
+            fBird = {x:90,y:240,r:13,v:0,targetTilt:0,currentTilt:0,wing:0};
+            fPipes=[];fFrame=0;fScore=0;fElapsed=0;fLastTime=0;fParticles=[];
+            fScorePop=0;fShake=0;flappyDying=false;flappyLooping=true;bgX=0;
+            document.getElementById('flappy-menu').classList.add('hidden');
+            document.getElementById('flappy-over').classList.add('hidden');
+            document.getElementById('flappy-score').classList.remove('hidden');
+            document.getElementById('flappy-score').innerText='0';
+            runFlappy(performance.now());
         }
-        function fJump() { if(flappyLooping) { fBird.v = -5.6; if(window.arcadeSound) window.arcadeSound('jump'); } }
-        fCanvas.addEventListener('pointerdown', e=>{if(flappyLooping){e.preventDefault();fJump();}});
-        // Glossy, rounded arcade pipes with a thick rim, edge highlights and rivets.
-        function drawFlappyPipe(x, y, w, h, openingAtBottom) {
-            if (h <= 0) return;
+        function fJump() {
+            if(flappyLooping&&!flappyDying){
+                fBird.v=-335;
+                fBird.wing=1;
+                if(window.arcadeSound)window.arcadeSound('jump');
+            }
+        }
+        fCanvas.addEventListener('pointerdown',e=>{if(flappyLooping&&!flappyDying){e.preventDefault();fJump();}});
+        function drawFlappyPipe(x,y,w,h,openingAtBottom) {
+            if(h<=0)return;
             fCtx.save();
-            fCtx.shadowColor = 'rgba(0,0,0,.28)'; fCtx.shadowBlur = 7; fCtx.shadowOffsetX = 3; fCtx.shadowOffsetY = 2;
-            const body = fCtx.createLinearGradient(x, 0, x + w, 0);
-            body.addColorStop(0, '#147b35'); body.addColorStop(.16, '#31b94e'); body.addColorStop(.42, '#79f078'); body.addColorStop(.68, '#38c653'); body.addColorStop(1, '#126b2b');
-            fCtx.fillStyle = body; fCtx.strokeStyle = '#105b29'; fCtx.lineWidth = 2;
-            fCtx.beginPath(); fCtx.rect(x + 3, y, w - 6, h); fCtx.fill(); fCtx.stroke();
-            fCtx.shadowColor = 'transparent'; fCtx.shadowBlur = 0; fCtx.shadowOffsetX = 0; fCtx.shadowOffsetY = 0;
-            // Bright glossy stripe and a darker edge for depth.
-            const shine = fCtx.createLinearGradient(x, 0, x + 12, 0);
-            shine.addColorStop(0, 'rgba(255,255,255,.04)'); shine.addColorStop(.5, 'rgba(255,255,255,.45)'); shine.addColorStop(1, 'rgba(255,255,255,0)');
-            fCtx.fillStyle = shine; fCtx.fillRect(x + 8, y + 2, 12, Math.max(0, h - 4));
-            fCtx.fillStyle = 'rgba(0,65,20,.24)'; fCtx.fillRect(x + w - 13, y + 2, 7, Math.max(0, h - 4));
-            // Thick opening collar, with rounded corners and a bright top edge.
-            const capH = 23, capX = x - 5, capW = w + 10;
-            const capY = openingAtBottom ? y + h - capH : y;
-            const cap = fCtx.createLinearGradient(capX, 0, capX + capW, 0);
-            cap.addColorStop(0, '#16843a'); cap.addColorStop(.22, '#43d75d'); cap.addColorStop(.5, '#9aff8d'); cap.addColorStop(.78, '#40cf55'); cap.addColorStop(1, '#11672b');
-            fCtx.fillStyle = cap; fCtx.strokeStyle = '#105b29'; fCtx.lineWidth = 2;
-            fCtx.beginPath();
-            const r = 4, right = capX + capW, bottom = capY + capH;
-            fCtx.moveTo(capX + r, capY); fCtx.lineTo(right - r, capY); fCtx.quadraticCurveTo(right, capY, right, capY + r);
-            fCtx.lineTo(right, bottom - r); fCtx.quadraticCurveTo(right, bottom, right - r, bottom);
-            fCtx.lineTo(capX + r, bottom); fCtx.quadraticCurveTo(capX, bottom, capX, bottom - r);
-            fCtx.lineTo(capX, capY + r); fCtx.quadraticCurveTo(capX, capY, capX + r, capY); fCtx.closePath(); fCtx.fill(); fCtx.stroke();
-            fCtx.fillStyle = 'rgba(255,255,255,.3)'; fCtx.fillRect(capX + 5, capY + 3, capW - 10, 3);
-            // Small metallic bolts on each collar.
-            for (const bx of [capX + 8, right - 8]) {
-                fCtx.beginPath(); fCtx.arc(bx, capY + capH / 2, 2.1, 0, Math.PI * 2); fCtx.fillStyle = '#d7ffd0'; fCtx.fill();
-                fCtx.beginPath(); fCtx.arc(bx, capY + capH / 2, .9, 0, Math.PI * 2); fCtx.fillStyle = '#247b35'; fCtx.fill();
+            fCtx.shadowColor='rgba(0,0,0,.25)';fCtx.shadowBlur=8;fCtx.shadowOffsetX=3;fCtx.shadowOffsetY=3;
+            const body=fCtx.createLinearGradient(x,0,x+w,0);
+            body.addColorStop(0,'#126a2d');body.addColorStop(.14,'#28a943');body.addColorStop(.36,'#82f47c');body.addColorStop(.53,'#3bc653');body.addColorStop(.82,'#23953b');body.addColorStop(1,'#0e5925');
+            fCtx.fillStyle=body;fCtx.strokeStyle='#104d26';fCtx.lineWidth=2;
+            fCtx.beginPath();fCtx.roundRect(x+3,y,w-6,h,3);fCtx.fill();fCtx.stroke();
+            fCtx.shadowColor='transparent';fCtx.shadowBlur=0;fCtx.shadowOffsetX=0;fCtx.shadowOffsetY=0;
+            fCtx.fillStyle='rgba(255,255,255,.32)';fCtx.fillRect(x+10,y+3,5,Math.max(0,h-6));
+            fCtx.fillStyle='rgba(0,45,15,.22)';fCtx.fillRect(x+w-13,y+3,6,Math.max(0,h-6));
+            const capH=24,capX=x-5,capW=w+10,capY=openingAtBottom?y+h-capH:y;
+            const cap=fCtx.createLinearGradient(capX,0,capX+capW,0);
+            cap.addColorStop(0,'#13732e');cap.addColorStop(.2,'#39c94e');cap.addColorStop(.46,'#a1ff91');cap.addColorStop(.7,'#40cf55');cap.addColorStop(1,'#105b28');
+            fCtx.fillStyle=cap;fCtx.strokeStyle='#105b29';fCtx.lineWidth=2;
+            fCtx.beginPath();fCtx.roundRect(capX,capY,capW,capH,5);fCtx.fill();fCtx.stroke();
+            fCtx.fillStyle='rgba(255,255,255,.35)';fCtx.fillRect(capX+5,capY+3,capW-10,3);
+            for(const bx of [capX+8,capX+capW-8]){
+                fCtx.beginPath();fCtx.arc(bx,capY+capH/2,2.2,0,Math.PI*2);fCtx.fillStyle='#e2ffdb';fCtx.fill();
+                fCtx.beginPath();fCtx.arc(bx,capY+capH/2,.9,0,Math.PI*2);fCtx.fillStyle='#247b35';fCtx.fill();
             }
             fCtx.restore();
         }
-        function runFlappy() {
-            if(!flappyLooping) return;
-            let skyGrad = fCtx.createLinearGradient(0,0,0,600); skyGrad.addColorStop(0, '#1a80b0'); skyGrad.addColorStop(1, '#4ec0ca');
-            fCtx.fillStyle = skyGrad; fCtx.fillRect(0,0,400,600);
-            bgX = (bgX - 0.5) % 400; fCtx.fillStyle = '#3c9ca4';
-            for(let i=0; i<3; i++) { fCtx.fillRect(i*180 + bgX, 480, 70, 80); fCtx.fillRect(i*180 + 40 + bgX, 440, 50, 120); }
-            fCtx.fillStyle = '#ded895'; fCtx.fillRect(0,550,400,50); fCtx.fillStyle = '#222'; fCtx.fillRect(0,550,400,4);
-            fBird.v += 0.24; fBird.y += fBird.v; fBird.targetTilt = Math.min(Math.PI/2, Math.max(-Math.PI/6, fBird.v * 0.08)); fBird.currentTilt += (fBird.targetTilt - fBird.currentTilt) * 0.15;
-            if(fBird.y + fBird.r >= 550 || fBird.y - fBird.r <= 0) return endFlappy();
-            fCtx.save(); fCtx.translate(fBird.x, fBird.y); fCtx.rotate(fBird.currentTilt);
-            fCtx.beginPath(); fCtx.arc(0, 0, fBird.r, 0, Math.PI*2); fCtx.fillStyle = '#ffeb3b'; fCtx.fill(); fCtx.strokeStyle = '#d84315'; fCtx.lineWidth = 2.5; fCtx.stroke();
-            fCtx.beginPath(); fCtx.arc(5, -4, 3.5, 0, Math.PI*2); fCtx.fillStyle = '#fff'; fCtx.fill(); fCtx.beginPath(); fCtx.arc(6, -4, 1.5, 0, Math.PI*2); fCtx.fillStyle = '#000'; fCtx.fill();
-            fCtx.beginPath(); fCtx.moveTo(11, -1); fCtx.lineTo(21, 2); fCtx.lineTo(11, 5); fCtx.fillStyle = '#ff5722'; fCtx.fill(); fCtx.restore();
-            if(fFrame % 110 === 0) { let top = Math.floor(Math.random()*260)+60; fPipes.push({x:400, top:top, bot:550-top-135, w:65, passed:false}); }
-            for(let i=fPipes.length-1; i>=0; i--) {
-                let p = fPipes[i]; p.x -= 2.2;
-                drawFlappyPipe(p.x, 0, p.w, p.top, true);
-                drawFlappyPipe(p.x, 550-p.bot, p.w, p.bot, false);
-                if(fBird.x+fBird.r-2 > p.x && fBird.x-fBird.r+2 < p.x+p.w && (fBird.y-fBird.r+3 < p.top || fBird.y+fBird.r-3 > 550-p.bot)) return endFlappy();
-                if(!p.passed && p.x+p.w < fBird.x) { p.passed = true; fScore++; if(window.arcadeSound)window.arcadeSound('score'); document.getElementById('flappy-score').innerText = fScore; }
-                if(p.x + p.w < -10) fPipes.splice(i,1);
+        function drawFlappyBackground(){
+            const sky=fCtx.createLinearGradient(0,0,0,600);
+            sky.addColorStop(0,'#1687bd');sky.addColorStop(.58,'#62d4df');sky.addColorStop(1,'#c6f2d9');
+            fCtx.fillStyle=sky;fCtx.fillRect(0,0,400,600);
+            // Soft drifting clouds give the background depth without distracting from play.
+            fCtx.save();fCtx.globalAlpha=.38;
+            for(let i=0;i<4;i++){
+                const x=((i*135-bgX*.42+460)%520)-60,y=65+(i%3)*67;
+                fCtx.fillStyle='#fff';fCtx.beginPath();fCtx.ellipse(x,y,27,10,0,0,Math.PI*2);fCtx.ellipse(x+15,y-6,19,13,0,0,Math.PI*2);fCtx.ellipse(x+30,y,25,10,0,0,Math.PI*2);fCtx.fill();
             }
-            fFrame++; requestAnimationFrame(runFlappy);
+            fCtx.restore();
+            fCtx.fillStyle='#74c99b';
+            for(let i=0;i<4;i++){const x=((i*150-bgX*.7+600)%600)-100;fCtx.beginPath();fCtx.ellipse(x,510,90,70,0,Math.PI,Math.PI*2);fCtx.fill();}
+            fCtx.fillStyle='#4ba979';
+            for(let i=0;i<5;i++){const x=((i*120-bgX+600)%600)-100;fCtx.beginPath();fCtx.ellipse(x,535,85,48,0,Math.PI,Math.PI*2);fCtx.fill();}
+            fCtx.fillStyle='#dfd39a';fCtx.fillRect(0,550,400,50);
+            fCtx.fillStyle='#b8a86f';fCtx.fillRect(0,550,400,5);
+            fCtx.fillStyle='#77bf58';fCtx.fillRect(0,550,400,7);
+            fCtx.fillStyle='rgba(255,255,255,.45)';
+            for(let x=-((bgX*1.8)%28);x<400;x+=28)fCtx.fillRect(x,563,14,3);
         }
-        function endFlappy() { if(window.arcadeSound)window.arcadeSound('hit'); saveArcadeRecord('flappy',fScore); flappyLooping = false; let rec = Math.max(fScore, localStorage.getItem('fRec3')||0); localStorage.setItem('fRec3', rec); document.getElementById('flappy-final').innerText = "Final Score: " + fScore; document.getElementById('flappy-over').classList.remove('hidden'); }
+        function drawFlappyBird(now){
+            fCtx.save();fCtx.translate(fBird.x,fBird.y);fCtx.rotate(fBird.currentTilt);
+            // Soft shadow and a small animated wing make the bird feel less static.
+            fCtx.fillStyle='rgba(18,53,67,.16)';fCtx.beginPath();fCtx.ellipse(1,5,13,9,0,0,Math.PI*2);fCtx.fill();
+            fCtx.fillStyle='#ffca28';fCtx.strokeStyle='#d77b16';fCtx.lineWidth=2.2;
+            fCtx.beginPath();fCtx.ellipse(0,0,13,12,0,0,Math.PI*2);fCtx.fill();fCtx.stroke();
+            const wingY=Math.sin(now*.025)*2+(fBird.wing? -3:0);
+            fCtx.fillStyle='#f59e0b';fCtx.beginPath();fCtx.ellipse(-3,3+wingY,7,4,-.35,0,Math.PI*2);fCtx.fill();
+            fCtx.strokeStyle='rgba(255,255,255,.65)';fCtx.lineWidth=1.5;fCtx.beginPath();fCtx.arc(-2,-3,7,3.5,5.5);fCtx.stroke();
+            fCtx.fillStyle='#fff';fCtx.beginPath();fCtx.arc(5,-4,4,0,Math.PI*2);fCtx.fill();
+            fCtx.fillStyle='#172033';fCtx.beginPath();fCtx.arc(6.2,-4,1.8,0,Math.PI*2);fCtx.fill();
+            fCtx.fillStyle='#ff7138';fCtx.beginPath();fCtx.moveTo(10,-1);fCtx.lineTo(21,2);fCtx.lineTo(10,5);fCtx.closePath();fCtx.fill();
+            fCtx.restore();
+        }
+        function fCircleRectHit(cx,cy,r,rx,ry,rw,rh){
+            const px=Math.max(rx,Math.min(cx,rx+rw)),py=Math.max(ry,Math.min(cy,ry+rh));
+            const dx=cx-px,dy=cy-py;return dx*dx+dy*dy<r*r;
+        }
+        function fBurst(x,y,count,color,speed=190){
+            for(let i=0;i<count;i++){const a=Math.random()*Math.PI*2,sp=speed*(.25+Math.random()*.85);fParticles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:.35+Math.random()*.5,max:.85,r:2+Math.random()*3,color});}
+        }
+        function drawFlappyParticles(dt){
+            for(let i=fParticles.length-1;i>=0;i--){
+                const p=fParticles[i];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=260*dt;p.vx*=Math.pow(.985,dt*60);
+                if(p.life<=0){fParticles.splice(i,1);continue;}
+                fCtx.globalAlpha=Math.max(0,p.life/p.max);fCtx.fillStyle=p.color;fCtx.beginPath();fCtx.arc(p.x,p.y,p.r*Math.max(.25,p.life/p.max),0,Math.PI*2);fCtx.fill();
+            }
+            fCtx.globalAlpha=1;
+        }
+        function endFlappy(){
+            if(flappyDying||!flappyLooping)return;
+            flappyLooping=false;flappyDying=true;fDeathAt=performance.now();fShake=1;
+            fBird.v=-125;fBurst(fBird.x,fBird.y,26,'#ffd54f',250);fBurst(fBird.x,fBird.y,12,'#fff4c2',180);
+            if(window.arcadeSound)window.arcadeSound('hit');
+            saveArcadeRecord('flappy',fScore);
+            const rec=Math.max(fScore,Number(localStorage.getItem('fRec3')||0));
+            localStorage.setItem('fRec3',String(rec));
+            document.getElementById('flappy-final').innerText='Score: '+fScore+'  ·  Best: '+rec;
+            runFlappy(performance.now());
+        }
+        function runFlappy(now){
+            if(!flappyLooping&&!flappyDying)return;
+            const dt=fLastTime?Math.min(.04,Math.max(0,(now-fLastTime)/1000)):1/60;
+            fLastTime=now;fElapsed+=dt;bgX=(bgX+48*dt)%600;
+            fCtx.save();
+            if(fShake>0){fCtx.translate((Math.random()-.5)*10*fShake,(Math.random()-.5)*10*fShake);fShake=Math.max(0,fShake-dt*2.8);}
+            drawFlappyBackground();
+            if(flappyLooping){
+                // Frame-rate-independent bird physics.
+                fBird.v+=790*dt;fBird.y+=fBird.v*dt;
+                fBird.targetTilt=Math.min(1.15,Math.max(-.5,fBird.v*.00155));
+                fBird.currentTilt+=(fBird.targetTilt-fBird.currentTilt)*(1-Math.pow(.0008,dt));
+                fBird.wing=Math.max(0,fBird.wing-dt*3.5);
+                if(fBird.y+fBird.r>=550||fBird.y-fBird.r<=0){endFlappy();}
+                if(flappyLooping){
+                    fFrame+=dt*60;
+                    if(fFrame>=110){fFrame=0;const gap=154,topMin=58,topMax=550-gap-65;const top=topMin+Math.random()*(topMax-topMin);fPipes.push({x:410,top,bot:550-(top+gap),w:66,passed:false});}
+                    const speed=132+Math.min(28,fScore*1.1);
+                    for(let i=fPipes.length-1;i>=0;i--){
+                        const p=fPipes[i];p.x-=speed*dt;
+                        const bottomY=550-p.bot;
+                        drawFlappyPipe(p.x,0,p.w,p.top,true);
+                        drawFlappyPipe(p.x,bottomY,p.w,p.bot,false);
+                        // Circle-to-rectangle tests avoid false hits at the bird's rounded corners.
+                        if(fCircleRectHit(fBird.x,fBird.y,fBird.r-2,p.x+3,0,p.w-6,p.top)||
+                           fCircleRectHit(fBird.x,fBird.y,fBird.r-2,p.x-5,p.top-24,p.w+10,24)||
+                           fCircleRectHit(fBird.x,fBird.y,fBird.r-2,p.x+3,bottomY,p.w-6,p.bot)||
+                           fCircleRectHit(fBird.x,fBird.y,fBird.r-2,p.x-5,bottomY,p.w+10,24)) {endFlappy();break;}
+                        if(!p.passed&&p.x+p.w<fBird.x){
+                            p.passed=true;fScore++;fScorePop=.22;
+                            if(window.arcadeSound)window.arcadeSound('score');
+                            document.getElementById('flappy-score').innerText=String(fScore);
+                            fBurst(fBird.x+12,fBird.y,7,'#fff5a6',75);
+                        }
+                        if(p.x+p.w<-15)fPipes.splice(i,1);
+                    }
+                }
+            }
+            // Draw pipes after updating them so their motion stays smooth at different refresh rates.
+            if(flappyDying||!flappyLooping){
+                fPipes.forEach(p=>{drawFlappyPipe(p.x,0,p.w,p.top,true);drawFlappyPipe(p.x,550-p.bot,p.w,p.bot,false);});
+                const age=(now-fDeathAt)/1000;
+                fBird.v+=900*dt;fBird.y+=fBird.v*dt;fBird.currentTilt=Math.min(1.4,fBird.currentTilt+dt*1.8);
+                if(fBird.y<548)drawFlappyBird(now);
+                drawFlappyParticles(dt);
+                fCtx.restore();
+                if(age>.62){flappyDying=false;document.getElementById('flappy-over').classList.remove('hidden');return;}
+                requestAnimationFrame(runFlappy);return;
+            }
+            drawFlappyBird(now);
+            drawFlappyParticles(dt);
+            if(fScorePop>0){
+                fScorePop=Math.max(0,fScorePop-dt);
+                const scale=1+Math.sin((.22-fScorePop)/.22*Math.PI)*.24;
+                fCtx.save();fCtx.translate(200,42);fCtx.scale(scale,scale);fCtx.fillStyle='rgba(255,255,255,.25)';fCtx.beginPath();fCtx.ellipse(0,0,25,19,0,0,Math.PI*2);fCtx.fill();fCtx.restore();
+            }
+            fCtx.restore();
+            requestAnimationFrame(runFlappy);
+        }
         // 2. BRICK BREAKER: 20 LEVELS + DURABLE BRICKS + THREE LIVES
         const bCanvas = document.getElementById('breakoutCanvas'); const bCtx = bCanvas.getContext('2d');
         let bBall, bPaddle, bricks, bScore = 0, breakoutLooping = false, bParticles = [], bLevel = 1, bLives = 3;
